@@ -1,10 +1,12 @@
 plugins {
     alias(libs.plugins.android.application)
+
 }
 
 android {
     namespace = "com.example.testweb"
     compileSdk = 35
+
 
     defaultConfig {
         applicationId = "com.example.testweb"
@@ -37,7 +39,10 @@ dependencies {
     implementation(libs.material)
     implementation(libs.activity)
     implementation(libs.constraintlayout)
+    implementation(libs.navigation.fragment)
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
+
+
 }
