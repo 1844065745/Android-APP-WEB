@@ -1,6 +1,7 @@
 // HomeFragment.java
 package com.example.testweb;
 
+import android.graphics.Color;
 import android.os.Bundle;
 import android.text.method.ScrollingMovementMethod;
 import android.view.LayoutInflater;
@@ -13,10 +14,19 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.github.mikephil.charting.charts.LineChart;
+import com.github.mikephil.charting.components.XAxis;
+import com.github.mikephil.charting.components.YAxis;
+import com.github.mikephil.charting.data.Entry;
+import com.github.mikephil.charting.data.LineData;
+import com.github.mikephil.charting.data.LineDataSet;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 public class HomeFragment extends Fragment {
@@ -29,6 +39,7 @@ public class HomeFragment extends Fragment {
     private TextView dataView;
     private Socket socket;
     private PrintWriter output;
+    private LineChart lineChart;
 
     @Nullable
     @Override
@@ -45,6 +56,7 @@ public class HomeFragment extends Fragment {
         dataView = view.findViewById(R.id.dataView);
         messageView = view.findViewById(R.id.messageView);
         messageView.setMovementMethod(new ScrollingMovementMethod());
+        lineChart = view.findViewById(R.id.chart1);
 
         connectButton.setOnClickListener(v -> {
             String ip = editTextIp.getText().toString();
@@ -86,31 +98,65 @@ public class HomeFragment extends Fragment {
 //                requireActivity().runOnUiThread(() ->
 //                        messageView.append("接收到: " + finalLine + "\n"));
 
-                int data_len = 3;
+                int data_len = 0;
                 String[] parts = line.split(",");
 
                 if(Objects.equals(parts[0], "data"))
                 {
                     requireActivity().runOnUiThread(() ->
                             dataView.setText("data:\n"));
-                    if (parts.length == (data_len + 1)) {
-                        try {
-
-                            for (int i=0;i<3;i++)
-                            {
-                                float data_par = Float.parseFloat(parts[i+1]);
-                                requireActivity().runOnUiThread(() ->
-                                        messageView.append("接收到: " + data_par + "\n"));
-                                int finalI = i + 1;
-                                requireActivity().runOnUiThread(() ->
-                                        dataView.append("数据" + finalI + ": " + data_par + "\n"));
-                            }
-
-                        } catch (NumberFormatException e) {
-                            // 数据解析错误
+                    data_len = parts.length - 1;
+                    try {
+                        for (int i=0;i<data_len;i++)
+                        {
+                            float data_par = Float.parseFloat(parts[i+1]);
                             requireActivity().runOnUiThread(() ->
-                                    messageView.append("数据解析错误\n"));
+                                    messageView.append("接收到: " + data_par + "\n"));
+                            int finalI = i + 1;
+                            requireActivity().runOnUiThread(() ->
+                                    dataView.append("数据" + finalI + ": " + data_par + "\n"));
                         }
+
+                    } catch (NumberFormatException e) {
+                        // 数据解析错误
+                        requireActivity().runOnUiThread(() ->
+                                messageView.append("数据解析错误\n"));
+                    }
+
+                }
+                else if(Objects.equals(parts[0], "chartdata"))
+                {
+                    data_len = parts.length - 1;
+                    try {
+                        List<Entry> entries = new ArrayList<>();
+                        for (int i=0;i<data_len;i++)
+                        {
+                            float data_par = Float.parseFloat(parts[i+1]);
+                            entries.add(new Entry(i, data_par));
+                            requireActivity().runOnUiThread(() ->
+                                    messageView.append("接收到: " + data_par + "\n"));
+                        }
+
+                        // 创建数据集
+                        LineDataSet dataSet = new LineDataSet(entries, "扫频数据");
+                        dataSet.setColor(Color.BLACK);
+                        dataSet.setValueTextColor(Color.BLACK);
+                        dataSet.setCircleColor(Color.RED);
+                        dataSet.setLineWidth(2f);
+                        dataSet.setCircleRadius(3f);
+                        dataSet.setValueTextSize(12f);
+                        dataSet.setDrawCircleHole(false);
+                        dataSet.setDrawValues(false);
+
+                        // 添加到图表
+                        LineData lineData = new LineData(dataSet);
+                        lineChart.setData(lineData);
+                        lineChart.invalidate(); // 刷新
+
+                    } catch (NumberFormatException e) {
+                        // 数据解析错误
+                        requireActivity().runOnUiThread(() ->
+                                messageView.append("数据解析错误\n"));
                     }
                 }
 
@@ -123,14 +169,6 @@ public class HomeFragment extends Fragment {
         }
     }
 
-    // 将大端序的4个字节转换为float
-    private float bytesToFloat(byte[] bytes, int offset) {
-        int intBits = ((bytes[offset] & 0xFF) << 24) |
-                ((bytes[offset+1] & 0xFF) << 16) |
-                ((bytes[offset+2] & 0xFF) << 8) |
-                (bytes[offset+3] & 0xFF);
-        return Float.intBitsToFloat(intBits);
-    }
 
 
     // 不能destroy，否则页面会崩溃

@@ -34,7 +34,7 @@ android {
 }
 
 dependencies {
-    //implementation(libs.mpandroidchart) // 使用最新版本
+    implementation(libs.mpandroidchart) // 使用最新版本
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.activity)
