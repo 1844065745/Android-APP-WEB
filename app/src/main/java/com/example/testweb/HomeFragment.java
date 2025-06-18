@@ -337,16 +337,16 @@ public class HomeFragment extends Fragment {
 
 
     // 不能destroy，否则页面会崩溃
-//    @Override
-//    public void onDestroy() {
-//        super.onDestroy();
-//        try {
-//            if (socket != null && !socket.isClosed()) {
-//                socket.close();
-//            }
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//        }
-//    }
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        try {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
 }
