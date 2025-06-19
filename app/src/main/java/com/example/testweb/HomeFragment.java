@@ -38,6 +38,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -47,6 +48,7 @@ public class HomeFragment extends Fragment {
     private EditText editTextSend;
     private Button connectButton;
     private Button sendButton;
+    private Button clearButton;
     private TextView messageView;
     private TextView dataView;
     private Socket socket;
@@ -71,6 +73,7 @@ public class HomeFragment extends Fragment {
         editTextSend = view.findViewById(R.id.editTextSend);        // ✅ 初始化发送输入框
         connectButton = view.findViewById(R.id.connectButton);
         sendButton = view.findViewById(R.id.sendButton);            // ✅ 初始化发送按钮
+        clearButton = view.findViewById(R.id.clearButton);
         dataView = view.findViewById(R.id.dataView);
         messageView = view.findViewById(R.id.messageView);
         messageView.setMovementMethod(new ScrollingMovementMethod());
@@ -97,6 +100,19 @@ public class HomeFragment extends Fragment {
             } else {
                 messageView.append("未连接服务器\n");
             }
+        });
+
+        clearButton.setOnClickListener(v -> {
+            entries.clear();
+            dataSet.setValues(new ArrayList<>());
+            dataSet.notifyDataSetChanged();
+            lineData.notifyDataChanged();
+            lineChart.notifyDataSetChanged();
+            lineChart.invalidate();
+            requireActivity().runOnUiThread(() ->
+                    messageView.setText(""));
+            requireActivity().runOnUiThread(() ->
+                    dataView.setText(""));
         });
 
         drawInit();
@@ -190,7 +206,7 @@ public class HomeFragment extends Fragment {
                     try {
                         float f = Float.parseFloat(parts[1]); // x轴 - 频率
                         float z = Float.parseFloat(parts[2]); // x2  - 阻抗
-                        float v = Float.parseFloat(parts[3]); // y轴 - 幅值
+                        float v = Float.parseFloat(parts[3]); // y轴 - 体积
 
                         requireActivity().runOnUiThread(() ->
                                 dataView.setText(""));
@@ -201,57 +217,63 @@ public class HomeFragment extends Fragment {
                         requireActivity().runOnUiThread(() ->
                                 dataView.append("体积: " + v + "\n"));
 
-                        Entry entry = new Entry(f, v);
+                        Entry entry = new Entry(v, f);
                         entries.add(entry);
+
+                        // 关键修复：按x轴(v)升序排序，避免闪退
+                        entries.sort((e1, e2) -> Float.compare(e1.getX(), e2.getX()));
+
+                        // ⚠️ 必须重新设置 dataset 的值！
+                        dataSet.setValues(entries);
 
                         requireActivity().runOnUiThread(() -> {
                             messageView.append("接收到: f=" + f + ", v=" + v + "\n");
-                        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
+                            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
 
-                        dataSet.notifyDataSetChanged();
-                        lineData.notifyDataChanged();
-                        lineChart.notifyDataSetChanged();
+                            dataSet.notifyDataSetChanged();
+                            lineData.notifyDataChanged();
+                            lineChart.notifyDataSetChanged();
 
-                        // 可选：自动移动到最新 x 点
-                        lineChart.setVisibleXRangeMaximum(100);
-                        lineChart.moveViewToX(f);
+                            // 可选：自动移动到最新 x 点
+    //                        lineChart.setVisibleXRangeMaximum(100);
+    //                        lineChart.moveViewToX(f);
 
-                        lineChart.invalidate(); // 刷新图表
+                            lineChart.invalidate(); // 刷新图表
 
-//                            // 报警提示
-//                            if ((v > 80.0) && !hasAlerted) {
-//                                hasAlerted = true;
-//
-//                                // 播放提示音（系统默认通知声）
-//                                try {
-//                                    MediaPlayer mediaPlayer = MediaPlayer.create(requireContext(), Settings.System.DEFAULT_NOTIFICATION_URI);
-//                                    if (mediaPlayer != null) {
-//                                        mediaPlayer.start();
-//                                    }
-//                                } catch (Exception e) {
-//                                    e.printStackTrace();
-//                                }
-//
-//                                // 震动提示（兼容 Android 12）
-//                                Vibrator vibrator = (Vibrator) requireContext().getSystemService(Context.VIBRATOR_SERVICE);
-//                                if (vibrator != null) {
-//                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-//                                        // 震动持续 500ms，使用默认强度
-//                                        vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
-//                                    } else {
-//                                        vibrator.vibrate(500); // 旧版本方式
-//                                    }
-//                                }
-//
-//                                // 报警提示对话框
-//                                new AlertDialog.Builder(requireContext())
-//                                        .setTitle("报警提示")
-//                                        .setMessage("检测到异常数据：v = " + v)
-//                                        .setPositiveButton("确定", (dialog, which) -> {
-//                                            hasAlerted = false; // 用户确认后允许再次报警
-//                                        })
-//                                        .show();
-//                            }
+                            // 报警提示
+                            if ((v > 200.0) && !hasAlerted) {
+                                hasAlerted = true;
+
+                                // 播放提示音（系统默认通知声）
+                                try {
+                                    MediaPlayer mediaPlayer = MediaPlayer.create(requireContext(), Settings.System.DEFAULT_NOTIFICATION_URI);
+                                    if (mediaPlayer != null) {
+                                        mediaPlayer.start();
+                                    }
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+
+                                // 震动提示（兼容 Android 12）
+                                Vibrator vibrator = (Vibrator) requireContext().getSystemService(Context.VIBRATOR_SERVICE);
+                                if (vibrator != null) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        // 震动持续 500ms，使用默认强度
+                                        vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
+                                    } else {
+                                        vibrator.vibrate(500); // 旧版本方式
+                                    }
+                                }
+
+                                // 报警提示对话框
+                                new AlertDialog.Builder(requireContext())
+                                        .setTitle("报警提示")
+                                        .setMessage("检测到异常数据：体积 = " + v + " mL")
+                                        .setPositiveButton("确定", (dialog, which) -> {
+                                            hasAlerted = false; // 用户确认后允许再次报警
+                                        })
+                                        .show();
+                            }
 
                         });
 
@@ -280,15 +302,17 @@ public class HomeFragment extends Fragment {
         // 设置 X 轴
         XAxis xAxis = lineChart.getXAxis();
         xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
-        xAxis.setTextSize(12f);
+        xAxis.setTextSize(10f);
         xAxis.setTextColor(Color.BLACK);
         xAxis.setDrawAxisLine(true);
-        xAxis.setDrawGridLines(true);
+        xAxis.setDrawGridLines(false);
         xAxis.setGranularity(1f);
+        xAxis.setAxisMinimum(0f);
+        xAxis.setAxisMaximum(300f);
         xAxis.setValueFormatter(new ValueFormatter() {
             @Override
             public String getFormattedValue(float value) {
-                return value + " Hz";
+                return value + " mL";
             }
         });
 
@@ -296,11 +320,13 @@ public class HomeFragment extends Fragment {
         YAxis leftAxis = lineChart.getAxisLeft();
         leftAxis.setTextSize(12f);
         leftAxis.setTextColor(Color.BLACK);
-        leftAxis.setAxisMinimum(0f);
+        leftAxis.setDrawGridLines(false);
+        leftAxis.setAxisMinimum(0.8f);
+        leftAxis.setAxisMaximum(3f);
         leftAxis.setValueFormatter(new ValueFormatter() {
             @Override
             public String getFormattedValue(float value) {
-                return value + " ";
+                return value + " MHz";
             }
         });
 
