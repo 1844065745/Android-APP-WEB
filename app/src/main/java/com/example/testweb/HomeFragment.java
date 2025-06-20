@@ -268,7 +268,7 @@ public class HomeFragment extends Fragment {
                                 // 报警提示对话框
                                 new AlertDialog.Builder(requireContext())
                                         .setTitle("Alarm notification")
-                                        .setMessage("Detected abnormal data: Volume =" + v + " mL\n" + "Need to urinate")
+                                        .setMessage("Bladder level : " + v + " mL !\n" + "You may need to urinate soon ~")
                                         .setPositiveButton("Confirm", (dialog, which) -> {
                                             hasAlerted = false; // 用户确认后允许再次报警
                                         })
