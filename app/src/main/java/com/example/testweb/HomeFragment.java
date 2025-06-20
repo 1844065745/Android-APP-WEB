@@ -88,17 +88,17 @@ public class HomeFragment extends Fragment {
         sendButton.setOnClickListener(v -> {
             String message = editTextSend.getText().toString();
             if (message.isEmpty()) {
-                messageView.append("请输入内容\n");
+                messageView.append("Input content\n");
                 return;
             }
             if (output != null) {
                 new Thread(() -> {
                     output.println(message);
                     requireActivity().runOnUiThread(() ->
-                            messageView.append("已发送: " + message + "\n"));
+                            messageView.append("Sent: " + message + "\n"));
                 }).start();
             } else {
-                messageView.append("未连接服务器\n");
+                messageView.append("Server not connected\n");
             }
         });
 
@@ -127,7 +127,7 @@ public class HomeFragment extends Fragment {
             output = new PrintWriter(socket.getOutputStream(), true);  // ✅ 修正为赋值到类成员变量 output
 
             requireActivity().runOnUiThread(() ->
-                    messageView.append("连接成功: " + ip + "\n"));
+                    messageView.append("Connected to: " + ip + "\n"));
 
             String line;
             while ((line = input.readLine()) != null) {
@@ -151,16 +151,16 @@ public class HomeFragment extends Fragment {
                         {
                             float data_par = Float.parseFloat(parts[i+1]);
                             requireActivity().runOnUiThread(() ->
-                                    messageView.append("接收到: " + data_par + "\n"));
+                                    messageView.append("Received: " + data_par + "\n"));
                             int finalI = i + 1;
                             requireActivity().runOnUiThread(() ->
-                                    dataView.append("数据" + finalI + ": " + data_par + "\n"));
+                                    dataView.append("Data" + finalI + ": " + data_par + "\n"));
                         }
 
                     } catch (NumberFormatException e) {
                         // 数据解析错误
                         requireActivity().runOnUiThread(() ->
-                                messageView.append("数据解析错误\n"));
+                                messageView.append("Data error\n"));
                     }
 
                 }
@@ -175,12 +175,12 @@ public class HomeFragment extends Fragment {
                             float data_par = Float.parseFloat(parts[i+1]);
                             entries.add(new Entry(i, data_par));
                             requireActivity().runOnUiThread(() ->
-                                    messageView.append("接收到: " + data_par + "\n"));
+                                    messageView.append("Received: " + data_par + "\n"));
                             scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
                         }
 
                         // 创建数据集
-                        LineDataSet dataSet = new LineDataSet(entries, "扫频数据");
+                        LineDataSet dataSet = new LineDataSet(entries, "Sensor data");
                         dataSet.setColor(Color.BLACK);
                         dataSet.setValueTextColor(Color.BLACK);
                         dataSet.setCircleColor(Color.RED);
@@ -198,7 +198,7 @@ public class HomeFragment extends Fragment {
                     } catch (NumberFormatException e) {
                         // 数据解析错误
                         requireActivity().runOnUiThread(() ->
-                                messageView.append("数据解析错误\n"));
+                                messageView.append("Data error\n"));
                     }
                 }
                 // 三点数据连续接收，并实时绘图
@@ -211,11 +211,11 @@ public class HomeFragment extends Fragment {
                         requireActivity().runOnUiThread(() ->
                                 dataView.setText(""));
                         requireActivity().runOnUiThread(() ->
-                                dataView.append("频率: " + f + "\n"));
+                                dataView.append("Frequency: " + f + "\n"));
                         requireActivity().runOnUiThread(() ->
-                                dataView.append("阻抗: " + z + "\n"));
+                                dataView.append("Impedance: " + z + "\n"));
                         requireActivity().runOnUiThread(() ->
-                                dataView.append("体积: " + v + "\n"));
+                                dataView.append("Volume: " + v + "\n"));
 
                         Entry entry = new Entry(v, f);
                         entries.add(entry);
@@ -227,7 +227,7 @@ public class HomeFragment extends Fragment {
                         dataSet.setValues(entries);
 
                         requireActivity().runOnUiThread(() -> {
-                            messageView.append("接收到: f=" + f + ", v=" + v + "\n");
+                            messageView.append("Received: f=" + f + ", v=" + v + "\n");
                             scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
 
                             dataSet.notifyDataSetChanged();
@@ -267,9 +267,9 @@ public class HomeFragment extends Fragment {
 
                                 // 报警提示对话框
                                 new AlertDialog.Builder(requireContext())
-                                        .setTitle("报警提示")
-                                        .setMessage("检测到异常数据：体积 = " + v + " mL")
-                                        .setPositiveButton("确定", (dialog, which) -> {
+                                        .setTitle("Alarm notification")
+                                        .setMessage("Detected abnormal data: Volume =" + v + " mL\n" + "Need to urinate")
+                                        .setPositiveButton("Confirm", (dialog, which) -> {
                                             hasAlerted = false; // 用户确认后允许再次报警
                                         })
                                         .show();
@@ -279,7 +279,7 @@ public class HomeFragment extends Fragment {
 
                     } catch (NumberFormatException e) {
                         requireActivity().runOnUiThread(() ->
-                                messageView.append("数据解析错误\n"));
+                                messageView.append("Data error\n"));
                     }
                 }
 
@@ -287,7 +287,7 @@ public class HomeFragment extends Fragment {
         } catch (Exception e) {
             e.printStackTrace();
             requireActivity().runOnUiThread(() ->
-                    messageView.append("连接失败: " + e.getMessage() + "\n"));
+                    messageView.append("connection failure: " + e.getMessage() + "\n"));
         }
     }
 
@@ -302,7 +302,7 @@ public class HomeFragment extends Fragment {
         // 设置 X 轴
         XAxis xAxis = lineChart.getXAxis();
         xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
-        xAxis.setTextSize(10f);
+        xAxis.setTextSize(8f);
         xAxis.setTextColor(Color.BLACK);
         xAxis.setDrawAxisLine(true);
         xAxis.setDrawGridLines(false);
@@ -348,7 +348,7 @@ public class HomeFragment extends Fragment {
         lineChart.getAxisLeft().setGridColor(Color.LTGRAY);
 
         // 初始化数据集
-        dataSet = new LineDataSet(entries, "扫频数据");
+        dataSet = new LineDataSet(entries, "Sensor data");
         dataSet.setColor(Color.BLACK);
         dataSet.setCircleColor(Color.RED);
         dataSet.setLineWidth(2f);
