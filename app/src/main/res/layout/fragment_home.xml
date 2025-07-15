@@ -40,13 +40,15 @@
             android:layout_height="wrap_content"
             android:layout_weight="0.4"
             android:text="CMD:" />
+
         <EditText
             android:id="@+id/editTextSend"
             android:layout_width="0sp"
             android:layout_height="wrap_content"
             android:layout_weight="2"
             android:hint="Please input message"
-            android:text="3"/>
+            android:text="2" />
+
         <Button
             android:id="@+id/sendButton"
             android:layout_width="0sp"

@@ -95,7 +95,7 @@ public class HomeFragment extends Fragment {
                 new Thread(() -> {
                     output.println(message);
                     requireActivity().runOnUiThread(() ->
-                            messageView.append("Sent: " + message + "\n"));
+                            messageView.append("[SEND] " + message + "\n"));
                 }).start();
             } else {
                 messageView.append("Server not connected\n");
@@ -131,9 +131,11 @@ public class HomeFragment extends Fragment {
 
             String line;
             while ((line = input.readLine()) != null) {
-//                String finalLine = line;
-//                requireActivity().runOnUiThread(() ->
-//                        messageView.append("接收到: " + finalLine + "\n"));
+                String finalLine = line;
+                requireActivity().runOnUiThread(() ->  { // 打印所有接收到的信息
+                    messageView.append("[REV] " + finalLine + "\n");
+                    scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
+                });
 
                 int data_len = 0; // 接收到的数据长度(以逗号分割的数量为准)
 
@@ -227,8 +229,8 @@ public class HomeFragment extends Fragment {
                         dataSet.setValues(entries);
 
                         requireActivity().runOnUiThread(() -> {
-                            messageView.append("Received: f=" + f + ", v=" + v + "\n");
-                            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
+                            // messageView.append("Received: f=" + f + ", v=" + v + "\n");
+                            // scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
 
                             dataSet.notifyDataSetChanged();
                             lineData.notifyDataChanged();
