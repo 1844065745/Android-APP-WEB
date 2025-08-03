@@ -809,7 +809,6 @@ public class HomeFragment extends Fragment {
     }
 
 
-
     private double[] simpleGaussianSmooth(double[] data, int windowSize) {
         int N = data.length;
         double[] out = new double[N];
