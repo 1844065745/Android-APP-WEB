@@ -1,9 +1,15 @@
-// HomeFragment.java
 package com.example.testweb;
 
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.graphics.Color;
+import android.media.MediaPlayer;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.provider.Settings;
 import android.text.method.ScrollingMovementMethod;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -12,17 +18,13 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
-import android.content.Context;
-import android.media.MediaPlayer;
-import android.os.Build;
-import android.os.VibrationEffect;
-import android.os.Vibrator;
-import android.provider.Settings;
+import androidx.lifecycle.ViewModelProvider;
 
-import android.graphics.Color;
 import com.github.mikephil.charting.charts.LineChart;
 import com.github.mikephil.charting.components.Description;
 import com.github.mikephil.charting.components.XAxis;
@@ -31,340 +33,671 @@ import com.github.mikephil.charting.data.Entry;
 import com.github.mikephil.charting.data.LineData;
 import com.github.mikephil.charting.data.LineDataSet;
 import com.github.mikephil.charting.formatter.ValueFormatter;
-
+import com.github.mikephil.charting.highlight.Highlight;
+import com.github.mikephil.charting.interfaces.datasets.ILineDataSet;
+import com.github.mikephil.charting.listener.OnChartValueSelectedListener;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.stream.IntStream;
+import org.jtransforms.fft.DoubleFFT_1D;
+
 
 public class HomeFragment extends Fragment {
 
-    private EditText editTextIp;
-    private EditText editTextSend;
-    private Button connectButton;
-    private Button sendButton;
-    private Button clearButton;
-    private TextView messageView;
-    private TextView dataView;
+    private EditText editTextIp, editTextSend;
+    private Button connectButton, sendButton, clearButton;
+    private TextView messageView, dataView;
+    private ScrollView scrollView;
+    private LineChart lineChart;
+    private LineChart settingsChart;
+
+
     private Socket socket;
     private PrintWriter output;
-    private LineChart lineChart;
+
     private final List<Entry> entries = new ArrayList<>();
     private LineDataSet dataSet;
     private LineData lineData;
     private boolean hasAlerted = false;
-    private ScrollView scrollView;;
 
+    private List<Float> latestDataRef = new ArrayList<>();
+    private Map<String, List<Float>> latestDataRawGroups = new LinkedHashMap<>();
 
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater,
-                             @Nullable ViewGroup container,
-                             @Nullable Bundle savedInstanceState) {
-
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_home, container, false);
+        initUI(view);
+        setupListeners();
+        setupChart();
+        setupSettingsChart();
+        observeLivePlotData();
+        return view;
+    }
 
+    private void initUI(View view) {
         editTextIp = view.findViewById(R.id.editTextIp);
-        editTextSend = view.findViewById(R.id.editTextSend);        // ✅ 初始化发送输入框
+        editTextSend = view.findViewById(R.id.editTextSend);
         connectButton = view.findViewById(R.id.connectButton);
-        sendButton = view.findViewById(R.id.sendButton);            // ✅ 初始化发送按钮
+        sendButton = view.findViewById(R.id.sendButton);
         clearButton = view.findViewById(R.id.clearButton);
         dataView = view.findViewById(R.id.dataView);
         messageView = view.findViewById(R.id.messageView);
-        messageView.setMovementMethod(new ScrollingMovementMethod());
-        lineChart = view.findViewById(R.id.chart1);
         scrollView = view.findViewById(R.id.myscrollView);
+        lineChart = view.findViewById(R.id.chart1);
+        messageView.setMovementMethod(new ScrollingMovementMethod());
+        settingsChart = view.findViewById(R.id.settingsChart);
+    }
 
-        connectButton.setOnClickListener(v -> {
-            String ip = editTextIp.getText().toString();
-            new Thread(() -> connectToServer(ip)).start();
-        });
-
+    private void setupListeners() {
+        connectButton.setOnClickListener(v -> new Thread(() -> connectToServer(editTextIp.getText().toString())).start());
         sendButton.setOnClickListener(v -> {
             String message = editTextSend.getText().toString();
             if (message.isEmpty()) {
-                messageView.append("Input content\n");
+                appendMessage("Input content\n");
                 return;
             }
             if (output != null) {
                 new Thread(() -> {
                     output.println(message);
-                    requireActivity().runOnUiThread(() ->
-                            messageView.append("[SEND] " + message + "\n"));
+                    runOnUiThread(() -> appendMessage("[SEND] " + message + "\n"));
                 }).start();
             } else {
-                messageView.append("Server not connected\n");
+                appendMessage("Server not connected\n");
             }
         });
-
         clearButton.setOnClickListener(v -> {
             entries.clear();
-            dataSet.setValues(new ArrayList<>());
-            dataSet.notifyDataSetChanged();
-            lineData.notifyDataChanged();
-            lineChart.notifyDataSetChanged();
-            lineChart.invalidate();
-            requireActivity().runOnUiThread(() ->
-                    messageView.setText(""));
-            requireActivity().runOnUiThread(() ->
-                    dataView.setText(""));
+            dataSet.clear();
+            runOnUiThread(() -> {
+                lineChart.invalidate();
+                messageView.setText("");
+                dataView.setText("");
+            });
         });
-
-        drawInit();
-
-        return view;
     }
 
     private void connectToServer(String ip) {
         try {
             socket = new Socket(ip, 12345);
             BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            output = new PrintWriter(socket.getOutputStream(), true);  // ✅ 修正为赋值到类成员变量 output
+            output = new PrintWriter(socket.getOutputStream(), true);
 
-            requireActivity().runOnUiThread(() ->
-                    messageView.append("Connected to: " + ip + "\n"));
+            appendMessage("Connected to: " + ip + "\n");
 
             String line;
             while ((line = input.readLine()) != null) {
-                String finalLine = line;
-                requireActivity().runOnUiThread(() ->  { // 打印所有接收到的信息
-                    messageView.append("[REV] " + finalLine + "\n");
-                    scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
-                });
-
-                int data_len = 0; // 接收到的数据长度(以逗号分割的数量为准)
-
-                // 解析字符串型数据，数据之间用","分割
-                String[] parts = line.split(",");
-
-                // 在data区显示接收到的数据
-                if(Objects.equals(parts[0], "data"))
-                {
-                    requireActivity().runOnUiThread(() ->
-                            dataView.setText("data:\n"));
-                    data_len = parts.length - 1;
-                    try {
-                        for (int i=0;i<data_len;i++)
-                        {
-                            float data_par = Float.parseFloat(parts[i+1]);
-                            requireActivity().runOnUiThread(() ->
-                                    messageView.append("Received: " + data_par + "\n"));
-                            int finalI = i + 1;
-                            requireActivity().runOnUiThread(() ->
-                                    dataView.append("Data" + finalI + ": " + data_par + "\n"));
-                        }
-
-                    } catch (NumberFormatException e) {
-                        // 数据解析错误
-                        requireActivity().runOnUiThread(() ->
-                                messageView.append("Data error\n"));
-                    }
-
-                }
-                // 不定长数据接收并绘图
-                else if(Objects.equals(parts[0], "chartdata"))
-                {
-                    data_len = parts.length - 1;
-                    try {
-                        List<Entry> entries = new ArrayList<>();
-                        for (int i=0;i<data_len;i++)
-                        {
-                            float data_par = Float.parseFloat(parts[i+1]);
-                            entries.add(new Entry(i, data_par));
-                            requireActivity().runOnUiThread(() ->
-                                    messageView.append("Received: " + data_par + "\n"));
-                            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
-                        }
-
-                        // 创建数据集
-                        LineDataSet dataSet = new LineDataSet(entries, "Sensor data");
-                        dataSet.setColor(Color.BLACK);
-                        dataSet.setValueTextColor(Color.BLACK);
-                        dataSet.setCircleColor(Color.RED);
-                        dataSet.setLineWidth(2f);
-                        dataSet.setCircleRadius(3f);
-                        dataSet.setValueTextSize(12f);
-                        dataSet.setDrawCircleHole(false);
-                        dataSet.setDrawValues(false);
-
-                        // 添加到图表
-                        LineData lineData = new LineData(dataSet);
-                        lineChart.setData(lineData);
-                        lineChart.invalidate(); // 刷新
-
-                    } catch (NumberFormatException e) {
-                        // 数据解析错误
-                        requireActivity().runOnUiThread(() ->
-                                messageView.append("Data error\n"));
-                    }
-                }
-                // 三点数据连续接收，并实时绘图
-                else if (parts.length >= 4 && "tridata".equals(parts[0])) {
-                    try {
-                        float f = Float.parseFloat(parts[1]); // x轴 - 频率
-                        float z = Float.parseFloat(parts[2]); // x2  - 阻抗
-                        float v = Float.parseFloat(parts[3]); // y轴 - 体积
-
-                        requireActivity().runOnUiThread(() ->
-                                dataView.setText(""));
-                        requireActivity().runOnUiThread(() ->
-                                dataView.append("Frequency: " + f + "\n"));
-                        requireActivity().runOnUiThread(() ->
-                                dataView.append("Impedance: " + z + "\n"));
-                        requireActivity().runOnUiThread(() ->
-                                dataView.append("Volume: " + v + "\n"));
-
-                        Entry entry = new Entry(v, f);
-                        entries.add(entry);
-
-                        // 关键修复：按x轴(v)升序排序，避免闪退
-                        entries.sort((e1, e2) -> Float.compare(e1.getX(), e2.getX()));
-
-                        // ⚠️ 必须重新设置 dataset 的值！
-                        dataSet.setValues(entries);
-
-                        requireActivity().runOnUiThread(() -> {
-                            // messageView.append("Received: f=" + f + ", v=" + v + "\n");
-                            // scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN)); // 滚动到底部
-
-                            dataSet.notifyDataSetChanged();
-                            lineData.notifyDataChanged();
-                            lineChart.notifyDataSetChanged();
-
-                            // 可选：自动移动到最新 x 点
-    //                        lineChart.setVisibleXRangeMaximum(100);
-    //                        lineChart.moveViewToX(f);
-
-                            lineChart.invalidate(); // 刷新图表
-
-                            // 报警提示
-                            if ((v > 200.0) && !hasAlerted) {
-                                hasAlerted = true;
-
-                                // 播放提示音（系统默认通知声）
-                                try {
-                                    MediaPlayer mediaPlayer = MediaPlayer.create(requireContext(), Settings.System.DEFAULT_NOTIFICATION_URI);
-                                    if (mediaPlayer != null) {
-                                        mediaPlayer.start();
-                                    }
-                                } catch (Exception e) {
-                                    e.printStackTrace();
-                                }
-
-                                // 震动提示（兼容 Android 12）
-                                Vibrator vibrator = (Vibrator) requireContext().getSystemService(Context.VIBRATOR_SERVICE);
-                                if (vibrator != null) {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        // 震动持续 500ms，使用默认强度
-                                        vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
-                                    } else {
-                                        vibrator.vibrate(500); // 旧版本方式
-                                    }
-                                }
-
-                                // 报警提示对话框
-                                new AlertDialog.Builder(requireContext())
-                                        .setTitle("Alarm notification")
-                                        .setMessage("Bladder level : " + v + " mL !\n" + "You may need to urinate soon ~")
-                                        .setPositiveButton("Confirm", (dialog, which) -> {
-                                            hasAlerted = false; // 用户确认后允许再次报警
-                                        })
-                                        .show();
-                            }
-
-                        });
-
-                    } catch (NumberFormatException e) {
-                        requireActivity().runOnUiThread(() ->
-                                messageView.append("Data error\n"));
-                    }
-                }
-
+                appendMessage("[REV] " + line + "\n");
+                handleIncomingLine(line);
             }
         } catch (Exception e) {
-            e.printStackTrace();
-            requireActivity().runOnUiThread(() ->
-                    messageView.append("connection failure: " + e.getMessage() + "\n"));
+            appendMessage("connection failure: " + e.getMessage() + "\n");
         }
     }
 
-    private void drawInit() {
-        // 设置图表标题
-        Description description = new Description();
-        description.setText(" ");
-        description.setTextSize(14f);
-        description.setTextColor(Color.DKGRAY);
-        lineChart.setDescription(description);
+    private void handleIncomingLine(String line) {
+        String[] parts = line.split(",");
+        if (parts.length == 0) return;
+        switch (parts[0]) {
+            case "data": handleData(parts); break;
+            case "chartdata": handleChartData(parts); break;
+            case "tridata": handleTriData(parts); break;
+            case "data_sum": handleDataSum(parts); break;
+            default: //appendMessage("[UNKNOWN] " + line + "\n");
+        }
+    }
 
-        // 设置 X 轴
+    private void handleData(String[] parts) {
+        runOnUiThread(() -> dataView.setText("data:\n"));
+        for (int i = 1; i < parts.length; i++) {
+            try {
+                float value = Float.parseFloat(parts[i]);
+                int finalI = i;
+                runOnUiThread(() -> {
+                    appendMessage("Received: " + value + "\n");
+                    dataView.append("Data" + finalI + ": " + value + "\n");
+                });
+            } catch (NumberFormatException e) {
+                appendMessage("Data error\n");
+            }
+        }
+    }
+
+    private void handleChartData(String[] parts) {
+        List<Entry> newEntries = new ArrayList<>();
+        for (int i = 1; i < parts.length; i++) {
+            try {
+                newEntries.add(new Entry(i - 1, Float.parseFloat(parts[i])));
+            } catch (NumberFormatException e) {
+                appendMessage("Data error\n");
+                return;
+            }
+        }
+        LineDataSet newDataSet = new LineDataSet(newEntries, "Sensor data");
+        styleLineDataSet(newDataSet);
+        runOnUiThread(() -> {
+            lineChart.setData(new LineData(newDataSet));
+            lineChart.invalidate();
+        });
+    }
+
+    @SuppressLint("DefaultLocale")
+    private void handleTriData(String[] parts) {
+        try {
+            float f = Float.parseFloat(parts[1]);
+            float z = Float.parseFloat(parts[2]);
+            float v = Float.parseFloat(parts[3]);
+
+            runOnUiThread(() -> dataView.setText(String.format("Frequency: %.2f\nImpedance: %.2f\nVolume: %.2f\n", f, z, v)));
+            entries.add(new Entry(v, f));
+            entries.sort((a, b) -> Float.compare(a.getX(), b.getX()));
+            dataSet.setValues(entries);
+            runOnUiThread(() -> {
+                dataSet.notifyDataSetChanged();
+                lineData.notifyDataChanged();
+                lineChart.notifyDataSetChanged();
+                lineChart.invalidate();
+                if (v > 200.0 && !hasAlerted) showAlarm(v);
+            });
+        } catch (NumberFormatException e) {
+            appendMessage("Data error\n");
+        }
+    }
+
+    private void handleDataSum(String[] parts) {
+        List<Float> dataRef = new ArrayList<>();
+        Map<String, List<Float>> dataRawGroups = new LinkedHashMap<>();
+
+        int i = 1; // Skip "data_sum"
+
+        // Step 1: check and parse "data_ref"
+        if (!"data_ref".equals(parts[i])) {
+            appendMessage("Missing data_ref section\n");
+            return;
+        }
+        i++;
+
+        while (i < parts.length && !parts[i].equals("data_raw")) {
+            try {
+                dataRef.add(Float.parseFloat(parts[i]));
+            } catch (NumberFormatException e) {
+                appendMessage("Invalid float in data_ref: " + parts[i] + "\n");
+                return;
+            }
+            i++;
+        }
+
+        if (i >= parts.length || !"data_raw".equals(parts[i])) {
+            appendMessage("Missing data_raw section\n");
+            return;
+        }
+        i++; // Skip "data_raw"
+
+        // Step 2: parse t0, t1, ...
+        String currentKey = null;
+        List<Float> currentList = null;
+
+        while (i < parts.length) {
+            String token = parts[i];
+            if (token.matches("t\\d+")) {
+                currentKey = token;
+                currentList = new ArrayList<>();
+                dataRawGroups.put(currentKey, currentList);
+            } else if (currentList != null) {
+                try {
+                    currentList.add(Float.parseFloat(token));
+                } catch (NumberFormatException e) {
+                    appendMessage("Invalid float in " + currentKey + ": " + token + "\n");
+                    return;
+                }
+            }
+            i++;
+        }
+
+        // 保存数据供后续使用
+        latestDataRef = new ArrayList<>(dataRef);
+        latestDataRawGroups = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Float>> entry : dataRawGroups.entrySet()) {
+            latestDataRawGroups.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+
+        // Step 3: show data preview
+        runOnUiThread(() -> {
+            StringBuilder builder = new StringBuilder();
+            builder.append("data_ref (" + dataRef.size() + "):\n");
+            builder.append(dataRef.subList(0, Math.min(5, dataRef.size())).toString()).append("\n\n");
+            for (Map.Entry<String, List<Float>> entry : dataRawGroups.entrySet()) {
+                builder.append(entry.getKey()).append(" (").append(entry.getValue().size()).append("):\n");
+                builder.append(entry.getValue().subList(0, Math.min(5, entry.getValue().size())).toString()).append("\n\n");
+            }
+            // appendMessage(builder.toString());
+        });
+
+        processDataSumAndFindPeak();
+    }
+
+    @SuppressLint("DefaultLocale")
+    private void processDataSumAndFindPeak() {
+        if (latestDataRef == null || latestDataRef.isEmpty() || latestDataRawGroups.isEmpty()) {
+            appendMessage("没有数据用于频谱处理。\n");
+            return;
+        }
+
+        int N = latestDataRef.size();
+        int numGroups = latestDataRawGroups.size();
+        double[][] freqDataMatrix = new double[numGroups][N];
+
+        // Step 1: 所有 data_raw - data_ref
+        int groupIndex = 0;
+        for (Map.Entry<String, List<Float>> entry : latestDataRawGroups.entrySet()) {
+            List<Float> raw = entry.getValue();
+            double[] diff = new double[N];
+            for (int i = 0; i < N; i++) {
+                diff[i] = raw.get(i) - latestDataRef.get(i);
+            }
+            freqDataMatrix[groupIndex++] = diff;
+        }
+
+        // Step 2: 计算每列的方差，权重 = 1 / var
+        double[] variances = new double[numGroups];
+        for (int j = 0; j < numGroups; j++) {
+            double mean = 0, var = 0;
+            for (int i = 0; i < N; i++) mean += freqDataMatrix[j][i];
+            mean /= N;
+            for (int i = 0; i < N; i++) var += Math.pow(freqDataMatrix[j][i] - mean, 2);
+            variances[j] = var / N;
+        }
+
+        double[] invVar = new double[numGroups];
+        double sumInv = 0;
+        for (int j = 0; j < numGroups; j++) {
+            invVar[j] = 1.0 / (variances[j] + 1e-8);
+            sumInv += invVar[j];
+        }
+
+        double[] weights = new double[numGroups];
+        for (int j = 0; j < numGroups; j++) weights[j] = invVar[j] / sumInv;
+
+        // Step 3: 构造 Hermitian 对称 → IFFT 得到时域信号
+        int timeLen = 2 * N - 1;
+        double[][] timeSignals = new double[numGroups][timeLen];
+        DoubleFFT_1D fft = new DoubleFFT_1D(timeLen);
+
+        for (int j = 0; j < numGroups; j++) {
+            double[] full = new double[timeLen * 2];
+            for (int i = 0; i < N; i++) full[2 * i] = freqDataMatrix[j][i];  // 实部
+            for (int i = 1; i < N; i++) full[2 * (timeLen - i)] = freqDataMatrix[j][i]; // 实部镜像
+
+            fft.complexInverse(full, true);
+
+            for (int i = 0; i < timeLen; i++) {
+                timeSignals[j][i] = full[2 * i]; // 实部
+            }
+        }
+
+        // Step 4: 加权平均
+        double[] weightedAvg = new double[timeLen];
+        for (int i = 0; i < timeLen; i++) {
+            for (int j = 0; j < numGroups; j++) {
+                weightedAvg[i] += weights[j] * timeSignals[j][i];
+            }
+        }
+
+        // Step 5: 简单平滑滤波器（代替 gaussian_filter1d）
+        double[] smoothed = simpleGaussianSmooth(weightedAvg, 4);  // ** 这个参数对结果有影响！
+
+        // Step 6: FFT → 找主峰
+        DoubleFFT_1D fft2 = new DoubleFFT_1D(timeLen);
+        double[] fftData = new double[timeLen * 2];
+        for (int i = 0; i < timeLen; i++) {
+            fftData[2 * i] = smoothed[i]; // 实部
+            fftData[2 * i + 1] = 0;       // 虚部
+        }
+
+        fft2.complexForward(fftData);
+
+        double[] magnitude = new double[N];
+        for (int i = 0; i < N; i++) {
+            double re = fftData[2 * i];
+            double im = fftData[2 * i + 1];
+            magnitude[i] = Math.sqrt(re * re + im * im);
+        }
+
+        // Step 7: 寻找最大峰值
+        int maxIdx = 0;
+        for (int i = 1; i < N; i++) {
+            if (magnitude[i] > magnitude[maxIdx]) maxIdx = i;
+        }
+        float peakFreqMHz = 0.8f + maxIdx * 0.01f;
+        appendMessage(String.format("Peak Frequency: %.2f MHz\n", peakFreqMHz));
+
+        // 👉 更新到 dataView 中
+        runOnUiThread(() -> dataView.setText(String.format("%.2f MHz", peakFreqMHz)));
+
+        drawSingleFrequencyPoint(peakFreqMHz);
+
+        // Step 8: 写入 CSV 文件
+        try {
+            File dir = new File(requireContext().getExternalFilesDir(null), "data_logs");
+            if (!dir.exists()) dir.mkdirs();
+
+            // 格式化时间和频率
+            @SuppressLint("SimpleDateFormat")
+            String timestamp = new java.text.SimpleDateFormat("MMdd_HHmmss").format(new java.util.Date());
+            String filename = String.format("%s_%.2fMHz.csv", timestamp, peakFreqMHz);
+
+            File file = new File(dir, filename);
+            FileWriter fw = new FileWriter(file);
+
+            // 写入 data_ref
+            fw.append("data_ref");
+            for (float v : latestDataRef) fw.append(",").append(String.valueOf(v));
+            fw.append("\n");
+
+            // 写入所有 data_raw
+            for (Map.Entry<String, List<Float>> entry : latestDataRawGroups.entrySet()) {
+                fw.append(entry.getKey());
+                for (float v : entry.getValue()) fw.append(",").append(String.valueOf(v));
+                fw.append("\n");
+            }
+
+            // 写入滤波后的 weightedAvg
+            fw.append("filtered");
+            for (double v : weightedAvg) fw.append(",").append(String.valueOf(v));
+            fw.append("\n");
+
+            fw.flush();
+            fw.close();
+
+            appendMessage("保存至: " + filename + "\n");
+        } catch (IOException e) {
+            appendMessage("写CSV错误: " + e.getMessage() + "\n");
+        }
+
+        // 更新sample data chart
+        // convert weightedAvg to List<Double>
+        List<Double> spectrumList = new ArrayList<>();
+        for (double v : magnitude) spectrumList.add(v);
+        // 更新 ViewModel
+        PlotDataViewModel viewModel = new ViewModelProvider(requireActivity()).get(PlotDataViewModel.class);
+        viewModel.update(latestDataRef, latestDataRawGroups, spectrumList);
+
+    }
+
+    private void drawSingleFrequencyPoint(float peakFrequencyMHz) {
+        entries.add(new Entry(entries.size(), peakFrequencyMHz)); // X轴为编号，Y轴为频率
+        entries.sort((a, b) -> Float.compare(a.getX(), b.getX()));
+        dataSet.setValues(entries);
+
+        runOnUiThread(() -> {
+            dataSet.notifyDataSetChanged();
+            lineData.notifyDataChanged();
+            lineChart.notifyDataSetChanged();
+            lineChart.moveViewToX(entries.size());  // 👈 自动移动到最新X位置
+            lineChart.invalidate();
+        });
+    }
+
+    @SuppressLint("DefaultLocale")
+    private void updatePlot(PlotDataViewModel viewModel) {
+        List<Float> ref = viewModel.getDataRef().getValue();
+        Map<String, List<Float>> raw = viewModel.getDataRaw().getValue();
+        List<Double> filtered = viewModel.getMagnitude().getValue();
+
+        if (ref == null || raw == null || filtered == null) return;
+
+        List<ILineDataSet> sets = new ArrayList<>();
+
+        // 横坐标从0.8~1.8MHz，共ref.size()个点
+        int N = ref.size();
+        float startFreq = 0.8f;
+        float stepFreq = 1.0f / N;  // 假设频率范围等分
+
+        List<Entry> refEntries = new ArrayList<>();
+        for (int i = 0; i < N; i++) {
+            refEntries.add(new Entry(startFreq + i * stepFreq, ref.get(i)));
+        }
+        LineDataSet refSet = new LineDataSet(refEntries, "data_ref");
+        refSet.setColor(Color.GRAY);
+        refSet.setDrawCircles(false);
+        sets.add(refSet);
+
+        int[] colors = {Color.BLUE, Color.MAGENTA, Color.GREEN, Color.CYAN, Color.LTGRAY};
+        int idx = 0;
+        for (Map.Entry<String, List<Float>> entry : raw.entrySet()) {
+            List<Entry> entries = new ArrayList<>();
+            List<Float> values = entry.getValue();
+            for (int i = 0; i < values.size(); i++) {
+                entries.add(new Entry(startFreq + i * stepFreq, values.get(i)));
+            }
+            LineDataSet rawSet = new LineDataSet(entries, entry.getKey());
+            rawSet.setColor(colors[idx % colors.length]);
+            rawSet.setDrawCircles(false);
+            sets.add(rawSet);
+            idx++;
+        }
+
+        List<Entry> filtEntries = new ArrayList<>();
+        for (int i = 0; i < filtered.size(); i++) {
+            filtEntries.add(new Entry(startFreq + i * stepFreq, filtered.get(i).floatValue()));
+        }
+        LineDataSet filtSet = new LineDataSet(filtEntries, "FFT filtered");
+        filtSet.setColor(Color.RED);
+        filtSet.setLineWidth(2f);
+        filtSet.setDrawCircles(false);
+        sets.add(filtSet);
+
+        // Step: 标记 FFT 主峰点
+        int maxIdx = 0;
+        for (int i = 1; i < filtered.size(); i++) {
+            if (filtered.get(i) > filtered.get(maxIdx)) maxIdx = i;
+        }
+        float peakValue = filtered.get(maxIdx).floatValue();
+        float peakFreq = startFreq + maxIdx * stepFreq;
+
+        Entry peakEntry = new Entry(peakFreq, peakValue);
+        LineDataSet peakSet = new LineDataSet(Collections.singletonList(peakEntry), String.format("Peak %.2f MHz", peakFreq));
+        peakSet.setColor(Color.MAGENTA);
+        peakSet.setCircleColor(Color.MAGENTA);
+        peakSet.setCircleRadius(5f);
+        peakSet.setDrawCircles(true);
+        peakSet.setDrawValues(true);
+        peakSet.setValueTextColor(Color.MAGENTA);
+        peakSet.setValueTextSize(12f);
+        peakSet.setDrawHighlightIndicators(true);
+
+        sets.add(peakSet);
+
+        settingsChart.setData(new LineData(sets));
+        settingsChart.invalidate();
+    }
+
+
+    private void observeLivePlotData() {
+        PlotDataViewModel viewModel = new ViewModelProvider(requireActivity()).get(PlotDataViewModel.class);
+
+        viewModel.getDataRef().observe(getViewLifecycleOwner(), ref -> updatePlot(viewModel));
+        viewModel.getDataRaw().observe(getViewLifecycleOwner(), raw -> updatePlot(viewModel));
+        viewModel.getMagnitude().observe(getViewLifecycleOwner(), filtered -> updatePlot(viewModel));
+    }
+
+
+    private void showAlarm(float volume) {
+        hasAlerted = true;
+        try {
+            MediaPlayer mediaPlayer = MediaPlayer.create(requireContext(), Settings.System.DEFAULT_NOTIFICATION_URI);
+            if (mediaPlayer != null) {
+                mediaPlayer.setOnCompletionListener(MediaPlayer::release);
+                mediaPlayer.start();
+            }
+        } catch (Exception ignored) {}
+
+        Vibrator vibrator = (Vibrator) requireContext().getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                vibrator.vibrate(500);
+            }
+        }
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle("Alarm notification")
+                .setMessage("Bladder level: " + volume + " mL!\nYou may need to urinate soon.")
+                .setPositiveButton("Confirm", (dialog, which) -> hasAlerted = false)
+                .show();
+    }
+
+    private void appendMessage(String msg) {
+        runOnUiThread(() -> {
+            messageView.append(msg);
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+        });
+    }
+
+    private void runOnUiThread(Runnable task) {
+        requireActivity().runOnUiThread(task);
+    }
+
+    private void setupChart() {
+        lineChart.setDescription(new Description());
+
         XAxis xAxis = lineChart.getXAxis();
+        xAxis.setDrawGridLines(false);  // ❌ 关闭横轴网格线
         xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
         xAxis.setTextSize(8f);
-        xAxis.setTextColor(Color.BLACK);
-        xAxis.setDrawAxisLine(true);
-        xAxis.setDrawGridLines(false);
+        xAxis.setAxisMinimum(0f); // 起始点
         xAxis.setGranularity(1f);
-        xAxis.setAxisMinimum(0f);
-        xAxis.setAxisMaximum(300f);
+        xAxis.setGranularityEnabled(true);
         xAxis.setValueFormatter(new ValueFormatter() {
             @Override
             public String getFormattedValue(float value) {
-                return value + " mL";
+                return String.valueOf((int) value);
             }
         });
 
-        // 设置 Y 轴
         YAxis leftAxis = lineChart.getAxisLeft();
+        leftAxis.setDrawGridLines(false);  // ❌ 关闭纵轴网格线
         leftAxis.setTextSize(12f);
-        leftAxis.setTextColor(Color.BLACK);
-        leftAxis.setDrawGridLines(false);
-        leftAxis.setAxisMinimum(0.8f);
-        leftAxis.setAxisMaximum(3f);
+        leftAxis.setAxisMinimum(0.4f);
+        leftAxis.setAxisMaximum(2.2f);
         leftAxis.setValueFormatter(new ValueFormatter() {
+            @SuppressLint("DefaultLocale")
             @Override
             public String getFormattedValue(float value) {
-                return value + " MHz";
+                return String.format("%.1f MHz", value);
             }
         });
 
-        lineChart.getAxisRight().setEnabled(false); // 关闭右侧Y轴
-
-        // 基础交互设置
+        lineChart.getAxisRight().setEnabled(false);
         lineChart.setTouchEnabled(true);
         lineChart.setDragEnabled(true);
         lineChart.setScaleEnabled(true);
         lineChart.setPinchZoom(true);
-        lineChart.setDrawGridBackground(false);
-        lineChart.setBackgroundColor(Color.WHITE);
 
-        // 风格调整
-        lineChart.setBackgroundColor(Color.TRANSPARENT);           // 图表整体背景透明
-        lineChart.setDrawGridBackground(false);                    // 不绘制网格背景（默认灰白）
-        lineChart.setExtraOffsets(5, 5, 5, 5);                      // 可选：图表边距
-        lineChart.getXAxis().setGridColor(Color.LTGRAY);           // 网格线颜色（可调淡）
-        lineChart.getAxisLeft().setGridColor(Color.LTGRAY);
-
-        // 初始化数据集
         dataSet = new LineDataSet(entries, "Sensor data");
-        dataSet.setColor(Color.BLACK);
-        dataSet.setCircleColor(Color.RED);
-        dataSet.setLineWidth(2f);
-        dataSet.setCircleRadius(3f);
-        dataSet.setDrawCircleHole(false);
-        dataSet.setDrawValues(false);
-
+        styleLineDataSet(dataSet);
         lineData = new LineData(dataSet);
         lineChart.setData(lineData);
 
+        // 点击图点，显示其坐标
+        lineChart.setOnChartValueSelectedListener(new OnChartValueSelectedListener() {
+            @Override
+            public void onValueSelected(Entry e, Highlight h) {
+                float x = e.getX();
+                float y = e.getY();
+                Toast.makeText(requireContext(),
+                        String.format("Index: %d, Freq: %.2f MHz", (int) x, y),
+                        Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNothingSelected() {
+                // 可留空
+            }
+        });
+
+    }
+    private void styleLineDataSet(LineDataSet set) {
+        set.setColor(Color.BLACK);
+        set.setCircleColor(Color.RED);
+        set.setLineWidth(2f);
+        set.setCircleRadius(3f);
+        set.setDrawCircleHole(false);
+        set.setDrawValues(false);
+    }
+
+    private void setupSettingsChart() {
+        settingsChart.setDescription(null);
+
+        XAxis xAxis = settingsChart.getXAxis();
+        xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
+        xAxis.setDrawGridLines(false);
+        xAxis.setGranularity(0.1f); // 最小间隔
+        xAxis.setGranularityEnabled(true);
+        xAxis.setTextSize(10f);
+        // xAxis.setLabelRotationAngle(-45); // 可选：旋转标签避免重叠
+
+        // 设置横坐标显示为 MHz
+        xAxis.setValueFormatter(new ValueFormatter() {
+            @Override
+            public String getFormattedValue(float value) {
+                return String.format("%.2f MHz", value);
+            }
+        });
+
+        settingsChart.getAxisLeft().setDrawGridLines(false);
+        settingsChart.getAxisRight().setEnabled(false);
+        settingsChart.setTouchEnabled(true);
+        settingsChart.setDragEnabled(true);
+        settingsChart.setScaleEnabled(true);
     }
 
 
-    // 不能destroy，否则页面会崩溃
+
+    private double[] simpleGaussianSmooth(double[] data, int windowSize) {
+        int N = data.length;
+        double[] out = new double[N];
+        int radius = windowSize / 2;
+        double sigma = windowSize / 3.0;
+        double sigma2 = 2 * sigma * sigma;
+        double[] kernel = new double[windowSize];
+        double sum = 0;
+
+        for (int i = 0; i < windowSize; i++) {
+            int x = i - radius;
+            kernel[i] = Math.exp(-x * x / sigma2);
+            sum += kernel[i];
+        }
+        for (int i = 0; i < windowSize; i++) kernel[i] /= sum;
+
+        for (int i = 0; i < N; i++) {
+            double val = 0;
+            for (int j = 0; j < windowSize; j++) {
+                int idx = i + j - radius;
+                if (idx >= 0 && idx < N) {
+                    val += kernel[j] * data[idx];
+                }
+            }
+            out[i] = val;
+        }
+        return out;
+    }
+
+
     @Override
     public void onDestroy() {
         super.onDestroy();
@@ -376,5 +709,4 @@ public class HomeFragment extends Fragment {
             e.printStackTrace();
         }
     }
-
 }

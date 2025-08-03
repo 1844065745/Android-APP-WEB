@@ -7,7 +7,7 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="40dp"
         android:orientation="horizontal">
         <TextView
             android:id="@+id/IPView"
@@ -17,6 +17,7 @@
             android:text="IP:" />
         <EditText
             android:id="@+id/editTextIp"
+            android:textSize="12sp"
             android:layout_width="0sp"
             android:layout_height="wrap_content"
             android:layout_weight="2"
@@ -32,7 +33,7 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="40dp"
         android:orientation="horizontal">
         <TextView
             android:id="@+id/CMDView"
@@ -43,14 +44,16 @@
 
         <EditText
             android:id="@+id/editTextSend"
+            android:textSize="12sp"
             android:layout_width="0sp"
             android:layout_height="wrap_content"
             android:layout_weight="2"
             android:hint="Please input message"
-            android:text="2" />
+            android:text="S 2" />
 
         <Button
             android:id="@+id/sendButton"
+
             android:layout_width="0sp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -61,9 +64,9 @@
         android:id="@+id/descView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="0.5"
+        android:layout_weight="0.4"
         android:scrollbars="vertical"
-        android:text="Measurement data chart"
+        android:text="Measurement Data"
         android:textStyle="bold"
         android:gravity="center"
         android:textSize="18dp"/>
@@ -72,36 +75,35 @@
         android:id="@+id/chart1"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="5"/>
+        android:layout_weight="4"/>
 
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:padding="3dp"
-        android:layout_weight="1.4"
+        android:layout_weight="0.8"
         android:orientation="horizontal">
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="30dp"
             android:layout_weight="2.4"
-            android:orientation="vertical">
+            android:layout_gravity="center_vertical"
+            android:orientation="horizontal">
             <TextView
                 android:id="@+id/datadevcView"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:scrollbars="vertical"
-                android:text="Data:"
-                android:gravity="bottom"
+                android:layout_height="match_parent"
+                android:layout_weight="2.1"
+                android:text="Frequency:"
+                android:gravity="center_vertical"
                 android:textStyle="bold"/>
             <TextView
                 android:id="@+id/dataView"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="4"
-                android:scrollbars="vertical"
-                android:gravity="top"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
                 android:textSize="16dp"/>
         </LinearLayout>
 
@@ -111,10 +113,27 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="Clear"
-            android:layout_marginTop="8dp"
-            android:layout_gravity="center_horizontal"/>
+            android:layout_gravity="center_vertical"/>
 
     </LinearLayout>
+
+
+    <TextView
+        android:id="@+id/dataResultView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.4"
+        android:scrollbars="vertical"
+        android:text="Sample Data"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:textSize="18dp"/>
+
+    <com.github.mikephil.charting.charts.LineChart
+        android:id="@+id/settingsChart"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="4"/>
 
 
     <TextView
@@ -131,7 +150,7 @@
         android:id="@+id/myscrollView"
         android:layout_width="match_parent"
         android:layout_height="0sp"
-        android:layout_weight="1.8"
+        android:layout_weight="1"
         android:gravity="top">
 
         <TextView
