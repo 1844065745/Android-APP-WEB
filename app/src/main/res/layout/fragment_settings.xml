@@ -3,12 +3,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <TextView
-        android:layout_gravity="center_horizontal"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_margin="15dp"
-        android:text="Setting Page\n——WYY" />
+<!--    <TextView-->
+<!--        android:layout_gravity="center_horizontal"-->
+<!--        android:layout_width="wrap_content"-->
+<!--        android:layout_height="wrap_content"-->
+<!--        android:layout_margin="15dp"-->
+<!--        android:text="Setting Page\n——WYY" />-->
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -22,15 +22,8 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:layout_margin="15dp"
-            android:text="导出CSV文件"/>
+            android:text="Export CSV file"/>
 
-        <Button
-            android:id="@+id/cmdButton_2"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_margin="15dp"
-            android:text="cmd2"/>
 
     </LinearLayout>
 

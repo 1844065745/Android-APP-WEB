@@ -35,7 +35,7 @@ public class SettingsFragment extends Fragment {
         View view = inflater.inflate(layout.fragment_settings, container, false);
 
         exportCsvButton = view.findViewById(R.id.exportCsvButton);
-        cmdButton_2 = view.findViewById(R.id.cmdButton_2);
+        // cmdButton_2 = view.findViewById(R.id.cmdButton_2);
 
         exportCsvButton.setOnClickListener(v -> showFileSelectionDialog());
 
@@ -60,7 +60,7 @@ public class SettingsFragment extends Fragment {
         List<File> selectedFiles = new ArrayList<>();
 
         AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
-        builder.setTitle("选择CSV文件")
+        builder.setTitle("Select CSV file")
                 .setMultiChoiceItems(fileNames, checkedItems, (dialog, which, isChecked) -> {
                     if (isChecked) {
                         selectedFiles.add(files[which]);
@@ -68,14 +68,14 @@ public class SettingsFragment extends Fragment {
                         selectedFiles.remove(files[which]);
                     }
                 })
-                .setPositiveButton("导出", (dialog, which) -> {
+                .setPositiveButton("Export", (dialog, which) -> {
                     if (selectedFiles.isEmpty()) {
                         showToast("未选择任何文件");
                     } else {
                         shareMultipleCsvFiles(selectedFiles);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton("Cancel", null)
                 .setNeutralButton("全选", (dialog, which) -> {
                     AlertDialog alert = (AlertDialog) dialog;
                     ListView listView = alert.getListView();
@@ -86,7 +86,7 @@ public class SettingsFragment extends Fragment {
                         }
                     }
                 })
-                .setNeutralButton("删除", (dialog, which) -> {
+                .setNeutralButton("Delete", (dialog, which) -> {
                     if (selectedFiles.isEmpty()) {
                         showToast("未选择任何文件");
                         return;

@@ -27,6 +27,7 @@ import androidx.lifecycle.ViewModelProvider;
 
 import com.github.mikephil.charting.charts.LineChart;
 import com.github.mikephil.charting.components.Description;
+import com.github.mikephil.charting.components.Legend;
 import com.github.mikephil.charting.components.XAxis;
 import com.github.mikephil.charting.components.YAxis;
 import com.github.mikephil.charting.data.Entry;
@@ -59,7 +60,7 @@ public class HomeFragment extends Fragment {
 
     private EditText editTextIp, editTextSend;
     private Button connectButton, sendButton, clearButton;
-    private TextView messageView, dataView;
+    private TextView messageView, dataView, volumeView;
     private ScrollView scrollView;
     private LineChart lineChart;
     private LineChart settingsChart;
@@ -73,6 +74,8 @@ public class HomeFragment extends Fragment {
     private LineData lineData;
     private boolean hasAlerted = false;
 
+    private float latestPeakFreq = -1f;
+    private List<Float> latestFiltered = new ArrayList<>();
     private List<Float> latestDataRef = new ArrayList<>();
     private Map<String, List<Float>> latestDataRawGroups = new LinkedHashMap<>();
 
@@ -95,6 +98,7 @@ public class HomeFragment extends Fragment {
         sendButton = view.findViewById(R.id.sendButton);
         clearButton = view.findViewById(R.id.clearButton);
         dataView = view.findViewById(R.id.dataView);
+        volumeView = view.findViewById(R.id.volumeView);
         messageView = view.findViewById(R.id.messageView);
         scrollView = view.findViewById(R.id.myscrollView);
         lineChart = view.findViewById(R.id.chart1);
@@ -210,7 +214,7 @@ public class HomeFragment extends Fragment {
                 lineData.notifyDataChanged();
                 lineChart.notifyDataSetChanged();
                 lineChart.invalidate();
-                if (v > 200.0 && !hasAlerted) showAlarm(v);
+                // if (v > 200.0 && !hasAlerted) showAlarm(v); // 旧版报警已弃用
             });
         } catch (NumberFormatException e) {
             appendMessage("Data error\n");
@@ -220,6 +224,8 @@ public class HomeFragment extends Fragment {
     private void handleDataSum(String[] parts) {
         List<Float> dataRef = new ArrayList<>();
         Map<String, List<Float>> dataRawGroups = new LinkedHashMap<>();
+        List<Float> dataFilt = new ArrayList<>();
+        float dataFre = -1f;
 
         int i = 1; // Skip "data_sum"
 
@@ -252,6 +258,11 @@ public class HomeFragment extends Fragment {
 
         while (i < parts.length) {
             String token = parts[i];
+
+            if (token.equals("data_fre") || token.equals("data_filt")) {
+                break;  // 进入下一阶段
+            }
+
             if (token.matches("t\\d+")) {
                 currentKey = token;
                 currentList = new ArrayList<>();
@@ -267,14 +278,44 @@ public class HomeFragment extends Fragment {
             i++;
         }
 
+        // Step 3: parse optional data_fre
+        if (i < parts.length && parts[i].equals("data_fre")) {
+            i++;
+            if (i < parts.length) {
+                try {
+                    dataFre = Float.parseFloat(parts[i]);
+                } catch (NumberFormatException e) {
+                    appendMessage("Invalid float in data_fre: " + parts[i] + "\n");
+                }
+                i++;
+            }
+        }
+
+        // Step 4: parse optional data_filt
+        if (i < parts.length && parts[i].equals("data_filt")) {
+            i++;
+            while (i < parts.length) {
+                try {
+                    dataFilt.add(Float.parseFloat(parts[i]));
+                } catch (NumberFormatException e) {
+                    appendMessage("Invalid float in data_filt: " + parts[i] + "\n");
+                    break;
+                }
+                i++;
+            }
+        }
+
         // 保存数据供后续使用
         latestDataRef = new ArrayList<>(dataRef);
         latestDataRawGroups = new LinkedHashMap<>();
         for (Map.Entry<String, List<Float>> entry : dataRawGroups.entrySet()) {
             latestDataRawGroups.put(entry.getKey(), new ArrayList<>(entry.getValue()));
         }
+        latestFiltered = new ArrayList<>(dataFilt);
+        latestPeakFreq = dataFre;
 
-        // Step 3: show data preview
+        // Step 5: show data preview
+        float finalDataFre = dataFre;
         runOnUiThread(() -> {
             StringBuilder builder = new StringBuilder();
             builder.append("data_ref (" + dataRef.size() + "):\n");
@@ -283,16 +324,96 @@ public class HomeFragment extends Fragment {
                 builder.append(entry.getKey()).append(" (").append(entry.getValue().size()).append("):\n");
                 builder.append(entry.getValue().subList(0, Math.min(5, entry.getValue().size())).toString()).append("\n\n");
             }
-            // appendMessage(builder.toString());
+            builder.append(String.format("data_fre: %.4f MHz\n", finalDataFre));
+            builder.append("data_filt preview:\n");
+            builder.append(dataFilt.subList(0, Math.min(5, dataFilt.size())).toString()).append("\n\n");
+            dataView.setText(builder.toString());
         });
 
-        processDataSumAndFindPeak();
+        // processDataSumAndFindPeak();
+        processReceivedFilteredData();
+    }
+
+    @SuppressLint("DefaultLocale")
+    private void processReceivedFilteredData() {
+        if (latestDataRef == null || latestDataRef.isEmpty() ||
+                latestDataRawGroups == null || latestDataRawGroups.isEmpty() ||
+                latestFiltered == null || latestFiltered.isEmpty() ||
+                latestPeakFreq <= 0f) {
+            appendMessage("Data not enough\n");
+            return;
+        }
+        int N = latestFiltered.size();
+        float freqStart = 0.8f;
+        float freqRange = 1.0f;
+        float step = freqRange / N;
+        // 👉<*> 显示峰值频率 + 定性容量估计
+        appendMessage(String.format("Frequency: %.3f MHz\n", latestPeakFreq));
+        runOnUiThread(() -> dataView.setText(String.format("%.3f MHz", latestPeakFreq)));
+        runOnUiThread(() -> {
+            String state;
+            int color;
+            if (latestPeakFreq >= 0.8f && latestPeakFreq < 1.1f) {
+                state = "FULL";
+                color = Color.RED;
+            } else if (latestPeakFreq >= 1.1f && latestPeakFreq < 1.2f) {
+                state = "NORMAL";
+                color = Color.rgb(255, 165, 0); // 橙色
+            } else if (latestPeakFreq >= 1.2f && latestPeakFreq <= 1.9f) {
+                state = "EMPTY";
+                color = Color.GREEN;
+            } else {
+                state = "UNKNOWN";
+                color = Color.GRAY;
+            }
+            volumeView.setText(state);
+            volumeView.setTextColor(color);
+            showAlarm();
+        });
+        // 👉 在图上标出主频率点
+        drawSingleFrequencyPoint(latestPeakFreq);
+        // 👉 转换 filtered 为 Double 列表传给 ViewModel
+        List<Double> filteredD = new ArrayList<>();
+        for (float v : latestFiltered) filteredD.add((double) v);
+        // 👉 更新 ViewModel → 更新图表
+        PlotDataViewModel viewModel = new ViewModelProvider(requireActivity()).get(PlotDataViewModel.class);
+        viewModel.update(latestDataRef, latestDataRawGroups, filteredD);
+        // 👉 保存数据到 CSV 文件
+        try {
+            File dir = new File(requireContext().getExternalFilesDir(null), "data_logs");
+            if (!dir.exists()) dir.mkdirs();
+
+            @SuppressLint("SimpleDateFormat")
+            String timestamp = new java.text.SimpleDateFormat("MMdd_HHmmss").format(new java.util.Date());
+            String filename = String.format("%s_%.3fMHz.csv", timestamp, latestPeakFreq);
+            File file = new File(dir, filename);
+            FileWriter fw = new FileWriter(file);
+            // 写入 data_ref
+            fw.append("data_ref");
+            for (float v : latestDataRef) fw.append(",").append(String.valueOf(v));
+            fw.append("\n");
+            // 写入所有 data_raw
+            for (Map.Entry<String, List<Float>> entry : latestDataRawGroups.entrySet()) {
+                fw.append(entry.getKey());
+                for (float v : entry.getValue()) fw.append(",").append(String.valueOf(v));
+                fw.append("\n");
+            }
+            // 写入 filtered
+            fw.append("filtered");
+            for (float v : latestFiltered) fw.append(",").append(String.valueOf(v));
+            fw.append("\n");
+            fw.flush();
+            fw.close();
+            appendMessage("Saved to: " + filename + "\n");
+        } catch (IOException e) {
+            appendMessage("Write to CSV error: " + e.getMessage() + "\n");
+        }
     }
 
     @SuppressLint("DefaultLocale")
     private void processDataSumAndFindPeak() {
         if (latestDataRef == null || latestDataRef.isEmpty() || latestDataRawGroups.isEmpty()) {
-            appendMessage("没有数据用于频谱处理。\n");
+            appendMessage("No data for process.\n");
             return;
         }
 
@@ -381,12 +502,34 @@ public class HomeFragment extends Fragment {
         for (int i = 1; i < N; i++) {
             if (magnitude[i] > magnitude[maxIdx]) maxIdx = i;
         }
-        float peakFreqMHz = 0.8f + maxIdx * 0.01f;
-        appendMessage(String.format("Peak Frequency: %.2f MHz\n", peakFreqMHz));
+        float step = 1.0f / N;  // 频率范围为 1.0 MHz，总点数为 N
+        float peakFreqMHz = 0.8f + maxIdx * step;
+        appendMessage(String.format("Peak Frequency: %.3f MHz\n", peakFreqMHz));
 
         // 👉 更新到 dataView 中
-        runOnUiThread(() -> dataView.setText(String.format("%.2f MHz", peakFreqMHz)));
+        runOnUiThread(() -> dataView.setText(String.format("%.3f MHz", peakFreqMHz)));
+        runOnUiThread(() -> {
+            String state;
+            int color;
+            if (peakFreqMHz >= 0.8f && peakFreqMHz < 1.1f) {
+                state = "FULL";
+                color = Color.RED;
+            } else if (peakFreqMHz >= 1.1f && peakFreqMHz < 1.2f) {
+                state = "NORMAL";
+                color = Color.rgb(255, 165, 0); // 橙色
+            } else if (peakFreqMHz >= 1.2f && peakFreqMHz <= 1.9f) {
+                state = "EMPTY";
+                color = Color.GREEN;
+            } else {
+                state = "UNKNOWN";
+                color = Color.GRAY;
+            }
+            volumeView.setText(state);
+            volumeView.setTextColor(color);
+            showAlarm();
+        });
 
+        // 绘制 M data 图表
         drawSingleFrequencyPoint(peakFreqMHz);
 
         // Step 8: 写入 CSV 文件
@@ -397,7 +540,7 @@ public class HomeFragment extends Fragment {
             // 格式化时间和频率
             @SuppressLint("SimpleDateFormat")
             String timestamp = new java.text.SimpleDateFormat("MMdd_HHmmss").format(new java.util.Date());
-            String filename = String.format("%s_%.2fMHz.csv", timestamp, peakFreqMHz);
+            String filename = String.format("%s_%.3fMHz.csv", timestamp, peakFreqMHz);
 
             File file = new File(dir, filename);
             FileWriter fw = new FileWriter(file);
@@ -422,9 +565,9 @@ public class HomeFragment extends Fragment {
             fw.flush();
             fw.close();
 
-            appendMessage("保存至: " + filename + "\n");
+            appendMessage("Saved to: " + filename + "\n");
         } catch (IOException e) {
-            appendMessage("写CSV错误: " + e.getMessage() + "\n");
+            appendMessage("Write to CSV error: " + e.getMessage() + "\n");
         }
 
         // 更新sample data chart
@@ -437,20 +580,6 @@ public class HomeFragment extends Fragment {
 
     }
 
-    private void drawSingleFrequencyPoint(float peakFrequencyMHz) {
-        entries.add(new Entry(entries.size(), peakFrequencyMHz)); // X轴为编号，Y轴为频率
-        entries.sort((a, b) -> Float.compare(a.getX(), b.getX()));
-        dataSet.setValues(entries);
-
-        runOnUiThread(() -> {
-            dataSet.notifyDataSetChanged();
-            lineData.notifyDataChanged();
-            lineChart.notifyDataSetChanged();
-            lineChart.moveViewToX(entries.size());  // 👈 自动移动到最新X位置
-            lineChart.invalidate();
-        });
-    }
-
     @SuppressLint("DefaultLocale")
     private void updatePlot(PlotDataViewModel viewModel) {
         List<Float> ref = viewModel.getDataRef().getValue();
@@ -461,65 +590,61 @@ public class HomeFragment extends Fragment {
 
         List<ILineDataSet> sets = new ArrayList<>();
 
-        // 横坐标从0.8~1.8MHz，共ref.size()个点
         int N = ref.size();
         float startFreq = 0.8f;
-        float stepFreq = 1.0f / N;  // 假设频率范围等分
-
-        List<Entry> refEntries = new ArrayList<>();
-        for (int i = 0; i < N; i++) {
-            refEntries.add(new Entry(startFreq + i * stepFreq, ref.get(i)));
-        }
-        LineDataSet refSet = new LineDataSet(refEntries, "data_ref");
-        refSet.setColor(Color.GRAY);
-        refSet.setDrawCircles(false);
-        sets.add(refSet);
+        float stepFreq = 1.0f / N;
 
         int[] colors = {Color.BLUE, Color.MAGENTA, Color.GREEN, Color.CYAN, Color.LTGRAY};
         int idx = 0;
+
+        // 绘制 data_raw - data_ref 差值
         for (Map.Entry<String, List<Float>> entry : raw.entrySet()) {
             List<Entry> entries = new ArrayList<>();
             List<Float> values = entry.getValue();
-            for (int i = 0; i < values.size(); i++) {
-                entries.add(new Entry(startFreq + i * stepFreq, values.get(i)));
+            for (int i = 0; i < Math.min(values.size(), ref.size()); i++) {
+                float diff = values.get(i) - ref.get(i);
+                entries.add(new Entry(startFreq + i * stepFreq, diff));
             }
-            LineDataSet rawSet = new LineDataSet(entries, entry.getKey());
-            rawSet.setColor(colors[idx % colors.length]);
-            rawSet.setDrawCircles(false);
-            sets.add(rawSet);
+            LineDataSet diffSet = new LineDataSet(entries, entry.getKey());  // ✅ 只保留 t0/t1...
+            diffSet.setColor(colors[idx % colors.length]);
+            diffSet.setDrawCircles(false);
+            sets.add(diffSet);
             idx++;
         }
 
+        // 绘制 filtered 曲线
         List<Entry> filtEntries = new ArrayList<>();
         for (int i = 0; i < filtered.size(); i++) {
             filtEntries.add(new Entry(startFreq + i * stepFreq, filtered.get(i).floatValue()));
         }
-        LineDataSet filtSet = new LineDataSet(filtEntries, "FFT filtered");
+        LineDataSet filtSet = new LineDataSet(filtEntries, "Processed data");
         filtSet.setColor(Color.RED);
         filtSet.setLineWidth(2f);
         filtSet.setDrawCircles(false);
         sets.add(filtSet);
 
-        // Step: 标记 FFT 主峰点
-        int maxIdx = 0;
-        for (int i = 1; i < filtered.size(); i++) {
-            if (filtered.get(i) > filtered.get(maxIdx)) maxIdx = i;
+        // 主峰点标记（不显示图例），使用 latestPeakFreq，仅当频率在 [0.8, 1.8] MHz 时绘制
+        if (latestPeakFreq >= 0.8f && latestPeakFreq <= 1.8f) {
+            int peakIdx = Math.round((latestPeakFreq - startFreq) / stepFreq);
+            if (peakIdx >= 0 && peakIdx < filtered.size()) {
+                float peakValue = filtered.get(peakIdx).floatValue();
+                Entry peakEntry = new Entry(latestPeakFreq, peakValue);
+                LineDataSet peakSet = new LineDataSet(Collections.singletonList(peakEntry), "");
+                peakSet.setColor(Color.MAGENTA);
+                peakSet.setCircleColor(Color.MAGENTA);
+                peakSet.setCircleRadius(5f);
+                peakSet.setDrawCircles(true);
+                peakSet.setDrawValues(false);
+                peakSet.setDrawHighlightIndicators(true);
+                peakSet.setHighlightLineWidth(1.5f);
+                peakSet.setHighlightEnabled(true);
+                peakSet.setDrawIcons(false);
+                peakSet.setDrawHorizontalHighlightIndicator(true);
+                peakSet.setDrawVerticalHighlightIndicator(true);
+                peakSet.setForm(Legend.LegendForm.NONE);
+                sets.add(peakSet);
+            }
         }
-        float peakValue = filtered.get(maxIdx).floatValue();
-        float peakFreq = startFreq + maxIdx * stepFreq;
-
-        Entry peakEntry = new Entry(peakFreq, peakValue);
-        LineDataSet peakSet = new LineDataSet(Collections.singletonList(peakEntry), String.format("Peak %.2f MHz", peakFreq));
-        peakSet.setColor(Color.MAGENTA);
-        peakSet.setCircleColor(Color.MAGENTA);
-        peakSet.setCircleRadius(5f);
-        peakSet.setDrawCircles(true);
-        peakSet.setDrawValues(true);
-        peakSet.setValueTextColor(Color.MAGENTA);
-        peakSet.setValueTextSize(12f);
-        peakSet.setDrawHighlightIndicators(true);
-
-        sets.add(peakSet);
 
         settingsChart.setData(new LineData(sets));
         settingsChart.invalidate();
@@ -535,7 +660,10 @@ public class HomeFragment extends Fragment {
     }
 
 
-    private void showAlarm(float volume) {
+    private void showAlarm() {
+        if (hasAlerted) return;
+        String status = volumeView.getText().toString();
+        if (!"FULL".equalsIgnoreCase(status)) return;
         hasAlerted = true;
         try {
             MediaPlayer mediaPlayer = MediaPlayer.create(requireContext(), Settings.System.DEFAULT_NOTIFICATION_URI);
@@ -544,7 +672,6 @@ public class HomeFragment extends Fragment {
                 mediaPlayer.start();
             }
         } catch (Exception ignored) {}
-
         Vibrator vibrator = (Vibrator) requireContext().getSystemService(Context.VIBRATOR_SERVICE);
         if (vibrator != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -553,13 +680,13 @@ public class HomeFragment extends Fragment {
                 vibrator.vibrate(500);
             }
         }
-
         new AlertDialog.Builder(requireContext())
                 .setTitle("Alarm notification")
-                .setMessage("Bladder level: " + volume + " mL!\nYou may need to urinate soon.")
+                .setMessage("Bladder status: FULL\nYou may need to urinate soon.")
                 .setPositiveButton("Confirm", (dialog, which) -> hasAlerted = false)
                 .show();
     }
+
 
     private void appendMessage(String msg) {
         runOnUiThread(() -> {
@@ -572,8 +699,23 @@ public class HomeFragment extends Fragment {
         requireActivity().runOnUiThread(task);
     }
 
+
+    private void drawSingleFrequencyPoint(float peakFrequencyMHz) {
+        entries.add(new Entry(entries.size(), peakFrequencyMHz)); // X轴为编号，Y轴为频率
+        entries.sort((a, b) -> Float.compare(a.getX(), b.getX()));
+        dataSet.setValues(entries);
+
+        runOnUiThread(() -> {
+            dataSet.notifyDataSetChanged();
+            lineData.notifyDataChanged();
+            lineChart.notifyDataSetChanged();
+            lineChart.moveViewToX(entries.size());  // 👈 自动移动到最新X位置
+            lineChart.invalidate();
+        });
+    }
+
     private void setupChart() {
-        lineChart.setDescription(new Description());
+        lineChart.getDescription().setEnabled(false);
 
         XAxis xAxis = lineChart.getXAxis();
         xAxis.setDrawGridLines(false);  // ❌ 关闭横轴网格线
@@ -592,8 +734,8 @@ public class HomeFragment extends Fragment {
         YAxis leftAxis = lineChart.getAxisLeft();
         leftAxis.setDrawGridLines(false);  // ❌ 关闭纵轴网格线
         leftAxis.setTextSize(12f);
-        leftAxis.setAxisMinimum(0.4f);
-        leftAxis.setAxisMaximum(2.2f);
+        leftAxis.setAxisMinimum(0.8f);
+        leftAxis.setAxisMaximum(1.9f);
         leftAxis.setValueFormatter(new ValueFormatter() {
             @SuppressLint("DefaultLocale")
             @Override
@@ -629,8 +771,8 @@ public class HomeFragment extends Fragment {
                 // 可留空
             }
         });
-
     }
+
     private void styleLineDataSet(LineDataSet set) {
         set.setColor(Color.BLACK);
         set.setCircleColor(Color.RED);
